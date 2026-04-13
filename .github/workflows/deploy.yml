@@ -18,6 +18,8 @@ jobs:
         key: ${{ secrets.EC2_SSH_KEY }}
         script: |
           cd ~/DEVOPS_APP
-          git pull origin main
-          docker compose down
+          git fetch origin main
+          git reset --hard origin/main
+          docker compose down -v
+          docker system prune -af --volumes
           docker compose up -d --build
