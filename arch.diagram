@@ -1,0 +1,171 @@
+# System Architecture Diagram
+
+## High-Level Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                         AWS EC2 Instance                            │
+│                                                                     │
+│  ┌──────────────────────────────────────────────────────────────┐  │
+│  │                    Docker Container Stack                    │  │
+│  │                                                              │  │
+│  │  ┌─────────────────────────────────────────────────────┐   │  │
+│  │  │              Nginx Container                        │   │  │
+│  │  │  ┌─────────────────────────────────────────────┐   │   │  │
+│  │  │  │  Nginx Reverse Proxy & Load Balancer      │   │   │  │
+│  │  │  │  • Listen on Port 80                       │   │   │  │
+│  │  │  │  • Route HTTP requests to backend          │   │   │  │
+│  │  │  │  • Handle WebSocket upgrades               │   │   │  │
+│  │  │  │  • Serve static content                    │   │   │  │
+│  │  │  └─────────────────────────────────────────────┘   │   │  │
+│  │  └────────────────┬──────────────────────────────────┘   │  │
+│  │                   │ (Internal Network: 3000)            │  │
+│  │                   ▼                                      │  │
+│  │  ┌─────────────────────────────────────────────────────┐   │  │
+│  │  │            Application Container                    │   │  │
+│  │  │  ┌─────────────────────────────────────────────┐   │   │  │
+│  │  │  │  Node.js + Express + Socket.IO             │   │   │  │
+│  │  │  │  • Listen on Port 3000                      │   │   │  │
+│  │  │  │  • Handle HTTP requests                     │   │   │  │
+│  │  │  │  • Manage WebSocket connections            │   │   │  │
+│  │  │  │  • Broadcast messages to clients            │   │   │  │
+│  │  │  └─────────────────────────────────────────────┘   │   │  │
+│  │  └─────────────────────────────────────────────────────┘   │  │
+│  │                                                              │  │
+│  └──────────────────────────────────────────────────────────────┘  │
+│                                                                     │
+│  External Access: Port 80 (HTTP)                                   │
+└─────────────────────────────────────────────────────────────────────┘
+                              ▲
+                              │
+                    ┌─────────┴──────────┐
+                    │                    │
+            ┌───────▼──────┐    ┌────────▼───────┐
+            │  Browser Tab 1│    │  Browser Tab 2│
+            │ WebSocket    │    │ WebSocket     │
+            │ Connect      │    │ Connect       │
+            └──────────────┘    └────────────────┘
+```
+
+## Data Flow Diagram
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│                        Client Browser 1                              │
+│                                                                      │
+│  ┌────────────────────────────────────────────────────────────────┐ │
+│  │                      User Interface                            │ │
+│  │              (HTML, CSS, JavaScript, Socket.IO)                │ │
+│  └─────────────────────────────┬────────────────────────────────┘ │
+└────────────────────────────────┼──────────────────────────────────┘
+                                 │
+                    ┌────────────┴────────────┐
+                    │                         │
+              Message Data              Connection
+                    │                         │
+                    ▼                         ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│                                                                      │
+│         ┌──────────────────────────────────────────────────┐        │
+│         │           Nginx (Reverse Proxy)                 │        │
+│         │  • Accept HTTP connections on Port 80           │        │
+│         │  • Upgrade to WebSocket when needed             │        │
+│         │  • Forward traffic to backend (Port 3000)       │        │
+│         └────────────────────┬─────────────────────────────┘        │
+│                              │                                      │
+│                              ▼                                      │
+│         ┌──────────────────────────────────────────────────┐        │
+│         │     Node.js Server (Express + Socket.IO)        │        │
+│         │  • Register WebSocket connections                │        │
+│         │  • Receive messages from clients                │        │
+│         │  • Broadcast to all connected clients            │        │
+│         └────────────────────┬─────────────────────────────┘        │
+│                              │                                      │
+│                 ┌────────────┴────────────┐                         │
+│                 │                         │                         │
+│          Broadcast 1                   Broadcast 2                  │
+│                 │                         │                         │
+│                 ▼                         ▼                         │
+│         ┌──────────────┐          ┌──────────────┐                 │
+│         │ Client 1     │          │ Client 2     │                 │
+│         │ WebSocket    │          │ WebSocket    │                 │
+│         └──────────────┘          └──────────────┘                 │
+│                                                                      │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+## Component Details
+
+### 1. **Nginx Container**
+- **Role:** Reverse proxy and load balancer
+- **Port:** 80 (external)
+- **Config File:** `nginx/default.conf`
+- **Responsibilities:**
+  - Accept incoming HTTP/WebSocket connections
+  - Route requests to Node.js backend
+  - Handle SSL termination (if configured)
+  - Serve static files
+  - Load balancing across backend instances
+
+### 2. **Application Container (Node.js + Express + Socket.IO)**
+- **Role:** Backend application server
+- **Port:** 3000 (internal)
+- **Main File:** `server.js`
+- **Technologies:**
+  - Node.js runtime
+  - Express.js framework
+  - Socket.IO library for WebSocket abstraction
+- **Responsibilities:**
+  - Accept connections from Nginx
+  - Manage WebSocket connections
+  - Handle real-time messaging
+  - Broadcast messages to all connected clients
+  - Manage client state
+
+## Communication Protocol
+
+### WebSocket Upgrade Handshake
+```
+1. Client: HTTP GET with Upgrade header
+2. Nginx: Recognizes upgrade request
+3. Nginx → Node.js: Forwards upgrade request
+4. Node.js: Accepts WebSocket connection
+5. Bidirectional WebSocket communication established
+6. Client and Server: Exchange messages in real-time
+```
+
+### Message Broadcasting
+```
+Client 1 sends message
+    ↓
+Server receives via Socket.IO
+    ↓
+Server broadcasts to all connected clients (including sender)
+    ↓
+Client 1 receives (confirmation)
+Client 2 receives (sees message from Client 1)
+```
+
+## Deployment Environment
+
+- **Platform:** AWS EC2 Instance
+- **OS:** Linux (typically Amazon Linux 2 or Ubuntu)
+- **Container Runtime:** Docker
+- **Orchestration:** Docker Compose
+- **Network:** Docker bridge network for inter-container communication
+- **Persistence:** Ephemeral (in-memory storage)
+
+## Key Features
+
+✅ containerized architecture
+✅ Reverse proxy configuration for security
+✅ Real-time bidirectional communication
+✅ Scalable multi-user support
+✅ Production-ready deployment
+✅ Easy to maintain and extend
+
+---
+
+**Last Updated:** April 2026
+**Version:** 1.0
+**Status:** Submission Ready
